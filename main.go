@@ -15,7 +15,6 @@ import (
 
 	acmev1alpha1 "github.com/cert-manager/cert-manager/pkg/acme/webhook/apis/acme/v1alpha1"
 	"github.com/cert-manager/cert-manager/pkg/acme/webhook/cmd"
-	"github.com/gobuffalo/flect/name"
 )
 
 var GroupName = os.Getenv("GROUP_NAME")
@@ -31,15 +30,15 @@ func main() {
 	// webhook, where the Name() method will be used to disambiguate between
 	// the different implementations.
 	cmd.RunWebhookServer(GroupName,
-		&customDNSProviderSolver{},
+		&jachymsolDNSProviderSolver{},
 	)
 }
 
-// customDNSProviderSolver implements the provider-specific logic needed to
+// jachymsolDNSProviderSolver implements the provider-specific logic needed to
 // 'present' an ACME challenge TXT record for your own DNS provider.
 // To do so, it must implement the `github.com/cert-manager/cert-manager/pkg/acme/webhook.Solver`
 // interface.
-type customDNSProviderSolver struct {
+type jachymsolDNSProviderSolver struct {
 	// If a Kubernetes 'clientset' is needed, you must:
 	// 1. uncomment the additional `client` field in this structure below
 	// 2. uncomment the "k8s.io/client-go/kubernetes" import at the top of the file
@@ -49,7 +48,7 @@ type customDNSProviderSolver struct {
 	client *kubernetes.Clientset
 }
 
-// customDNSProviderConfig is a structure that is used to decode into when
+// jachymsolDNSProviderConfig is a structure that is used to decode into when
 // solving a DNS01 challenge.
 // This information is provided by cert-manager, and may be a reference to
 // additional configuration that's needed to solve the challenge for this
@@ -63,7 +62,7 @@ type customDNSProviderSolver struct {
 // You should not include sensitive information here. If credentials need to
 // be used by your provider here, you should reference a Kubernetes Secret
 // resource and fetch these credentials using a Kubernetes clientset.
-type customDNSProviderConfig struct {
+type jachymsolDNSProviderConfig struct {
 	// Change the two fields below according to the format of the configuration
 	// to be decoded.
 	// These fields will be set by users in the
@@ -86,7 +85,7 @@ type valueOrSecretRef struct {
 // solvers configured with the same Name() **so long as they do not co-exist
 // within a single webhook deployment**.
 // For example, `cloudflare` may be used as the name of a solver.
-func (c *customDNSProviderSolver) Name() string {
+func (c *jachymsolDNSProviderSolver) Name() string {
 	return "jachymsol"
 }
 
@@ -95,7 +94,7 @@ func (c *customDNSProviderSolver) Name() string {
 // This method should tolerate being called multiple times with the same value.
 // cert-manager itself will later perform a self check to ensure that the
 // solver has correctly configured the DNS provider.
-func (c *customDNSProviderSolver) Present(ch *acmev1alpha1.ChallengeRequest) error {
+func (c *jachymsolDNSProviderSolver) Present(ch *acmev1alpha1.ChallengeRequest) error {
 	cfg, err := loadConfig(ch.Config)
 	if err != nil {
 		return fmt.Errorf("Unable to load config: %w", err)
@@ -120,7 +119,7 @@ func (c *customDNSProviderSolver) Present(ch *acmev1alpha1.ChallengeRequest) err
 // value provided on the ChallengeRequest should be cleaned up.
 // This is in order to facilitate multiple DNS validations for the same domain
 // concurrently.
-func (c *customDNSProviderSolver) CleanUp(ch *acmev1alpha1.ChallengeRequest) error {
+func (c *jachymsolDNSProviderSolver) CleanUp(ch *acmev1alpha1.ChallengeRequest) error {
 	cfg, err := loadConfig(ch.Config)
 	if err != nil {
 		return fmt.Errorf("Unable to load config: %w", err)
@@ -144,7 +143,7 @@ func (c *customDNSProviderSolver) CleanUp(ch *acmev1alpha1.ChallengeRequest) err
 // provider accounts.
 // The stopCh can be used to handle early termination of the webhook, in cases
 // where a SIGTERM or similar signal is sent to the webhook process.
-func (c *customDNSProviderSolver) Initialize(kubeClientConfig *rest.Config, stopCh <-chan struct{}) error {
+func (c *jachymsolDNSProviderSolver) Initialize(kubeClientConfig *rest.Config, stopCh <-chan struct{}) error {
 	cl, err := kubernetes.NewForConfig(kubeClientConfig)
 	if err != nil {
 		return err
@@ -157,8 +156,8 @@ func (c *customDNSProviderSolver) Initialize(kubeClientConfig *rest.Config, stop
 
 // loadConfig is a small helper function that decodes JSON configuration into
 // the typed config struct.
-func loadConfig(cfgJSON *extapi.JSON) (customDNSProviderConfig, error) {
-	cfg := customDNSProviderConfig{}
+func loadConfig(cfgJSON *extapi.JSON) (jachymsolDNSProviderConfig, error) {
+	cfg := jachymsolDNSProviderConfig{}
 	// handle the 'base case' where no configuration has been provided
 	if cfgJSON == nil {
 		return cfg, nil
@@ -171,31 +170,36 @@ func loadConfig(cfgJSON *extapi.JSON) (customDNSProviderConfig, error) {
 }
 
 // getClient is a helper function to create the DnsClient
-func (c *customDNSProviderSolver) getClient(cfg customDNSProviderConfig, namespace string) (client *DnsClient, err error) {
+func (c *jachymsolDNSProviderSolver) getClient(cfg jachymsolDNSProviderConfig, namespace string) (client *DnsClient, err error) {
 	username, err := c.resolveValueOrFromSecret(cfg.Username, namespace)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to get client: %w", err)
 	}
-	password, err := c.resolveValueOrFromSecret(cfg.Username, namespace)
+	password, err := c.resolveValueOrFromSecret(cfg.Password, namespace)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to get client: %w", err)
 	}
 	domainId, err := c.resolveValueOrFromSecret(cfg.DomainId, namespace)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to get client: %w", err)
 	}
 
-	return NewDnsClient(DnsClientConfig{
+	dnsClient, err := NewDnsClient(DnsClientConfig{
 		DnsClientBaseUrl:  cfg.BaseUrl,
 		DnsClientUsername: username,
 		DnsClientPassword: password,
 		DnsClientDomainId: domainId,
 	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to get client: %w", err)
+	}
+
+	return dnsClient, nil
 }
 
 // resolveValueOrFromSecret is a helper function which resolves the value from secret reference
 // if it is set there
-func (c *customDNSProviderSolver) resolveValueOrFromSecret(vsr valueOrSecretRef, namespace string) (value string, err error) {
+func (c *jachymsolDNSProviderSolver) resolveValueOrFromSecret(vsr valueOrSecretRef, namespace string) (value string, err error) {
 	if vsr.SecretRef != nil {
 		secret, err := c.client.CoreV1().Secrets(namespace).Get(context.Background(), vsr.SecretRef.Name, metav1.GetOptions{})
 

@@ -4,7 +4,6 @@ go 1.25.0
 
 require (
 	github.com/cert-manager/cert-manager v1.19.2
-	github.com/gobuffalo/flect v1.0.3
 	github.com/miekg/dns v1.1.72
 	github.com/stretchr/testify v1.11.1
 	golang.org/x/net v0.49.0

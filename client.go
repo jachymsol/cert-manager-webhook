@@ -79,7 +79,10 @@ func (c *DnsClient) DeleteRecord(domain string) error {
 	}
 
 	// Find the correct node with the record
-	recordId := ""
+	found, recordId, err := findTxtRecordId(doc, domain)
+	if err != nil || !found {
+		return fmt.Errorf("failed to find recordId in records page: %w", err)
+	}
 
 	if recordId == "" {
 		return fmt.Errorf("record not found for domain: %s", domain)
@@ -171,7 +174,12 @@ func findTxtRecordId(node *html.Node, domain string) (found bool, recordId strin
 
 		if nodeDomain == domain {
 			// node.NextSibling is <td><a href="...">, return the parsed recordId from href
-			return true, getRecordIdFromNodeDomain(node.NextSibling), nil
+			recordId, err := getRecordIdFromNodeDomain(node.NextSibling)
+			if err != nil {
+				return false, "", err
+			}
+
+			return true, recordId, nil
 		}
 	}
 

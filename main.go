@@ -1,15 +1,21 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 
+	corev1 "k8s.io/api/core/v1"
 	extapi "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 
-	"github.com/cert-manager/cert-manager/pkg/acme/webhook/apis/acme/v1alpha1"
+	acmev1alpha1 "github.com/cert-manager/cert-manager/pkg/acme/webhook/apis/acme/v1alpha1"
 	"github.com/cert-manager/cert-manager/pkg/acme/webhook/cmd"
+	"github.com/gobuffalo/flect/name"
 )
 
 var GroupName = os.Getenv("GROUP_NAME")
@@ -40,7 +46,7 @@ type customDNSProviderSolver struct {
 	// 3. uncomment the relevant code in the Initialize method below
 	// 4. ensure your webhook's service account has the required RBAC role
 	//    assigned to it for interacting with the Kubernetes APIs you need.
-	//client kubernetes.Clientset
+	client *kubernetes.Clientset
 }
 
 // customDNSProviderConfig is a structure that is used to decode into when
@@ -63,8 +69,15 @@ type customDNSProviderConfig struct {
 	// These fields will be set by users in the
 	// `issuer.spec.acme.dns01.providers.webhook.config` field.
 
-	//Email           string `json:"email"`
-	//APIKeySecretRef v1alpha1.SecretKeySelector `json:"apiKeySecretRef"`
+	BaseUrl  string           `json:"baseUrl"`
+	Username valueOrSecretRef `json:"username"`
+	Password valueOrSecretRef `json:"password"`
+	DomainId valueOrSecretRef `json:"domainId"`
+}
+
+type valueOrSecretRef struct {
+	Value     string                    `json:"value"`
+	SecretRef *corev1.SecretKeySelector `json:"secretRef"`
 }
 
 // Name is used as the name for this DNS solver when referencing it on the ACME
@@ -74,7 +87,7 @@ type customDNSProviderConfig struct {
 // within a single webhook deployment**.
 // For example, `cloudflare` may be used as the name of a solver.
 func (c *customDNSProviderSolver) Name() string {
-	return "my-custom-solver"
+	return "jachymsol"
 }
 
 // Present is responsible for actually presenting the DNS record with the
@@ -82,17 +95,23 @@ func (c *customDNSProviderSolver) Name() string {
 // This method should tolerate being called multiple times with the same value.
 // cert-manager itself will later perform a self check to ensure that the
 // solver has correctly configured the DNS provider.
-func (c *customDNSProviderSolver) Present(ch *v1alpha1.ChallengeRequest) error {
+func (c *customDNSProviderSolver) Present(ch *acmev1alpha1.ChallengeRequest) error {
 	cfg, err := loadConfig(ch.Config)
 	if err != nil {
-		return err
+		return fmt.Errorf("Unable to load config: %w", err)
 	}
 
-	// TODO: do something more useful with the decoded configuration
-	fmt.Printf("Decoded configuration %v", cfg)
+	client, err := c.getClient(cfg, ch.ResourceNamespace)
+	if err != nil {
+		return fmt.Errorf("Unable to get client: %w", err)
+	}
 
-	// TODO: add code that sets a record in the DNS provider's console
-	return nil
+	// Extract subdomain from FQDN (e.g., _acme-challenge.sub.example.com -> _acme-challenge.sub)
+	domainParts := strings.Split(ch.ResolvedFQDN, ".")
+	sub := strings.Join(domainParts[:len(domainParts)-2], ".")
+
+	// Publish the DNS record
+	return client.PublishRecord(sub, ch.Key)
 }
 
 // CleanUp should delete the relevant TXT record from the DNS provider console.
@@ -101,9 +120,19 @@ func (c *customDNSProviderSolver) Present(ch *v1alpha1.ChallengeRequest) error {
 // value provided on the ChallengeRequest should be cleaned up.
 // This is in order to facilitate multiple DNS validations for the same domain
 // concurrently.
-func (c *customDNSProviderSolver) CleanUp(ch *v1alpha1.ChallengeRequest) error {
-	// TODO: add code that deletes a record from the DNS provider's console
-	return nil
+func (c *customDNSProviderSolver) CleanUp(ch *acmev1alpha1.ChallengeRequest) error {
+	cfg, err := loadConfig(ch.Config)
+	if err != nil {
+		return fmt.Errorf("Unable to load config: %w", err)
+	}
+
+	client, err := c.getClient(cfg, ch.ResourceNamespace)
+	if err != nil {
+		return fmt.Errorf("Unable to get client: %w", err)
+	}
+
+	// Delete the DNS record
+	return client.DeleteRecord(ch.ResolvedFQDN)
 }
 
 // Initialize will be called when the webhook first starts.
@@ -116,17 +145,13 @@ func (c *customDNSProviderSolver) CleanUp(ch *v1alpha1.ChallengeRequest) error {
 // The stopCh can be used to handle early termination of the webhook, in cases
 // where a SIGTERM or similar signal is sent to the webhook process.
 func (c *customDNSProviderSolver) Initialize(kubeClientConfig *rest.Config, stopCh <-chan struct{}) error {
-	///// UNCOMMENT THE BELOW CODE TO MAKE A KUBERNETES CLIENTSET AVAILABLE TO
-	///// YOUR CUSTOM DNS PROVIDER
+	cl, err := kubernetes.NewForConfig(kubeClientConfig)
+	if err != nil {
+		return err
+	}
 
-	//cl, err := kubernetes.NewForConfig(kubeClientConfig)
-	//if err != nil {
-	//	return err
-	//}
-	//
-	//c.client = cl
+	c.client = cl
 
-	///// END OF CODE TO MAKE KUBERNETES CLIENTSET AVAILABLE
 	return nil
 }
 
@@ -143,4 +168,47 @@ func loadConfig(cfgJSON *extapi.JSON) (customDNSProviderConfig, error) {
 	}
 
 	return cfg, nil
+}
+
+// getClient is a helper function to create the DnsClient
+func (c *customDNSProviderSolver) getClient(cfg customDNSProviderConfig, namespace string) (client *DnsClient, err error) {
+	username, err := c.resolveValueOrFromSecret(cfg.Username, namespace)
+	if err != nil {
+		return nil, err
+	}
+	password, err := c.resolveValueOrFromSecret(cfg.Username, namespace)
+	if err != nil {
+		return nil, err
+	}
+	domainId, err := c.resolveValueOrFromSecret(cfg.DomainId, namespace)
+	if err != nil {
+		return nil, err
+	}
+
+	return NewDnsClient(DnsClientConfig{
+		DnsClientBaseUrl:  cfg.BaseUrl,
+		DnsClientUsername: username,
+		DnsClientPassword: password,
+		DnsClientDomainId: domainId,
+	})
+}
+
+// resolveValueOrFromSecret is a helper function which resolves the value from secret reference
+// if it is set there
+func (c *customDNSProviderSolver) resolveValueOrFromSecret(vsr valueOrSecretRef, namespace string) (value string, err error) {
+	if vsr.SecretRef != nil {
+		secret, err := c.client.CoreV1().Secrets(namespace).Get(context.Background(), vsr.SecretRef.Name, metav1.GetOptions{})
+
+		if err != nil {
+			return "", err
+		}
+
+		secBytes, ok := secret.Data[vsr.SecretRef.Key]
+		if !ok {
+			return "", fmt.Errorf("key %q not found in secret %s: %w", vsr.SecretRef.Key, vsr.SecretRef.Name, err)
+		}
+
+		return string(secBytes), nil
+	}
+	return vsr.Value, nil
 }

@@ -3,11 +3,20 @@ entries:
   jachymsol-cert-manager-webhook:
   - apiVersion: v1
     appVersion: 0.1.0
-    created: "2026-02-06T22:56:49.651108+01:00"
+    created: "2026-02-06T23:13:27.101855+01:00"
+    description: A Helm chart for Kubernetes
+    digest: 63c769ad4bab8015d07ca1bd09decba2d05f591e63b0711c93fd5c81483cec0a
+    name: jachymsol-cert-manager-webhook
+    urls:
+    - https://jachymsol.github.io/cert-manager-webhook/jachymsol-cert-manager-webhook-0.1.1.tgz
+    version: 0.1.1
+  - apiVersion: v1
+    appVersion: 0.1.0
+    created: "2026-02-06T23:13:27.101668+01:00"
     description: A Helm chart for Kubernetes
     digest: 55d5e9c2a977a8b496d58ec798fed05c466d75d7da5d6a6b9d3f04ab6c79704b
     name: jachymsol-cert-manager-webhook
     urls:
-    - https://jachymsol.github.com/cert-manager-webhook/jachymsol-cert-manager-webhook-0.1.0.tgz
+    - https://jachymsol.github.io/cert-manager-webhook/jachymsol-cert-manager-webhook-0.1.0.tgz
     version: 0.1.0
-generated: "2026-02-06T22:56:49.650278+01:00"
+generated: "2026-02-06T23:13:27.100918+01:00"

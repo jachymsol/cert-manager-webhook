@@ -7,7 +7,6 @@ import (
 	"os"
 	"strings"
 
-	corev1 "k8s.io/api/core/v1"
 	extapi "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
@@ -68,15 +67,20 @@ type jachymsolDNSProviderConfig struct {
 	// These fields will be set by users in the
 	// `issuer.spec.acme.dns01.providers.webhook.config` field.
 
-	BaseUrl  string           `json:"baseUrl"`
-	Username valueOrSecretRef `json:"username"`
-	Password valueOrSecretRef `json:"password"`
-	DomainId valueOrSecretRef `json:"domainId"`
+	BaseUrl  string           `json:"baseUrl,omitempty"`
+	Username valueOrSecretRef `json:"username,omitempty"`
+	Password valueOrSecretRef `json:"password,omitempty"`
+	DomainId valueOrSecretRef `json:"domainId,omitempty"`
 }
 
 type valueOrSecretRef struct {
-	Value     string                    `json:"value"`
-	SecretRef *corev1.SecretKeySelector `json:"secretRef"`
+	Value     string        `json:"value,omitempty"`
+	SecretRef *SecretKeyRef `json:"secretRef,omitempty"`
+}
+
+type SecretKeyRef struct {
+	Name string `json:"name,omitempty"`
+	Key  string `json:"key,omitempty"`
 }
 
 // Name is used as the name for this DNS solver when referencing it on the ACME

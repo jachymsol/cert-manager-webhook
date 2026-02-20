@@ -7,7 +7,7 @@ import (
 	"os"
 	"strings"
 
-	cmmeta "github.com/cert-manager/cert-manager/pkg/apis/meta/v1"
+	corev1 "k8s.io/api/core/v1"
 	extapi "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
@@ -76,7 +76,7 @@ type jachymsolDNSProviderConfig struct {
 
 type valueOrSecretRef struct {
 	Value     string                    `json:"value,omitempty"`
-	SecretRef *cmmeta.SecretKeySelector `json:"secretRef,omitempty"`
+	SecretRef *corev1.SecretKeySelector `json:"secretRef,omitempty"`
 }
 
 // Name is used as the name for this DNS solver when referencing it on the ACME

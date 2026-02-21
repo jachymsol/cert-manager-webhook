@@ -12,10 +12,13 @@ import (
 )
 
 const (
-	TEMPLATE_ENDPOINT_LOGIN             = "/login.php?username=%s&password=%s&action=login&lang=cs"
-	TEMPLATE_ENDPOINT_GET_RECORDS       = "/index.php?page=domeny-dns&id_domain=%s"
-	TEMPLATE_ENDPOINT_ADD_TXT_RECORD    = "/index.php?sub=%s&txt=%s&page=domany-dns-txt-add&action=txt_add&id_domain=%s"
-	TEMPLATE_ENDPOINT_DELETE_TXT_RECORD = "/index.php?page=domeny-dns&action=txt_delete&id_domain=%s&id=%s"
+	ENDPOINT_LOGIN = "/login.php?"
+	ENDPOINT_INDEX = "/index.php?"
+
+	TEMPLATE_SEARCH_PARAMS_LOGIN             = "username=%s&password=%s&action=login&lang=cs"
+	TEMPLATE_SEARCH_PARAMS_GET_RECORDS       = "/index.php?page=domeny-dns&id_domain=%s"
+	TEMPLATE_SEARCH_PARAMS_ADD_TXT_RECORD    = "/index.php?sub=%s&txt=%s&page=domany-dns-txt-add&action=txt_add&id_domain=%s"
+	TEMPLATE_SEARCH_PARAMS_DELETE_TXT_RECORD = "/index.php?page=domeny-dns&action=txt_delete&id_domain=%s&id=%s"
 )
 
 type DnsClient struct {
@@ -93,7 +96,7 @@ func (c *DnsClient) DeleteRecord(domain string) error {
 }
 
 func (c *DnsClient) login() error {
-	loginUrl := c.baseUrl + url.PathEscape(fmt.Sprintf(TEMPLATE_ENDPOINT_LOGIN, c.username, c.password))
+	loginUrl := c.baseUrl + ENDPOINT_LOGIN + url.PathEscape(fmt.Sprintf(TEMPLATE_SEARCH_PARAMS_LOGIN, c.username, c.password))
 
 	resp, err := c.httpClient.Get(loginUrl)
 	if err != nil {
@@ -110,7 +113,7 @@ func (c *DnsClient) login() error {
 }
 
 func (c *DnsClient) addTxtRecord(sub string, txt string) error {
-	addUrl := c.baseUrl + url.PathEscape(fmt.Sprintf(TEMPLATE_ENDPOINT_ADD_TXT_RECORD, sub, txt, c.domainId))
+	addUrl := c.baseUrl + ENDPOINT_INDEX + url.PathEscape(fmt.Sprintf(TEMPLATE_SEARCH_PARAMS_ADD_TXT_RECORD, sub, txt, c.domainId))
 
 	req, err := http.NewRequest("GET", addUrl, nil)
 	if err != nil {
@@ -138,7 +141,7 @@ type DnsRecord struct {
 }
 
 func (c *DnsClient) getRecords() (*html.Node, error) {
-	getUrl := c.baseUrl + url.PathEscape(fmt.Sprintf(TEMPLATE_ENDPOINT_GET_RECORDS, c.domainId))
+	getUrl := c.baseUrl + ENDPOINT_INDEX + url.PathEscape(fmt.Sprintf(TEMPLATE_SEARCH_PARAMS_GET_RECORDS, c.domainId))
 
 	req, err := http.NewRequest("GET", getUrl, nil)
 	if err != nil {
@@ -251,7 +254,7 @@ func getRecordIdFromNodeDomain(tdNode *html.Node) (string, error) {
 }
 
 func (c *DnsClient) deleteTxtRecord(recordId string) error {
-	deleteUrl := c.baseUrl + url.PathEscape(fmt.Sprintf(TEMPLATE_ENDPOINT_DELETE_TXT_RECORD, c.domainId, recordId))
+	deleteUrl := c.baseUrl + ENDPOINT_INDEX + url.PathEscape(fmt.Sprintf(TEMPLATE_SEARCH_PARAMS_DELETE_TXT_RECORD, c.domainId, recordId))
 
 	req, err := http.NewRequest("GET", deleteUrl, nil)
 	if err != nil {

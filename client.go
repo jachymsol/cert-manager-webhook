@@ -9,17 +9,14 @@ import (
 	"strings"
 
 	"golang.org/x/net/html"
-	"k8s.io/klog/v2"
 )
 
 const (
-	ENDPOINT_LOGIN = "/login.php?"
-	ENDPOINT_INDEX = "/index.php?"
+	ENDPOINT_LOGIN = "login.php"
+	ENDPOINT_INDEX = "index.php"
 
-	TEMPLATE_SEARCH_PARAMS_LOGIN             = "username=%s&password=%s&action=login&lang=cs"
-	TEMPLATE_SEARCH_PARAMS_GET_RECORDS       = "/index.php?page=domeny-dns&id_domain=%s"
-	TEMPLATE_SEARCH_PARAMS_ADD_TXT_RECORD    = "/index.php?sub=%s&txt=%s&page=domany-dns-txt-add&action=txt_add&id_domain=%s"
-	TEMPLATE_SEARCH_PARAMS_DELETE_TXT_RECORD = "/index.php?page=domeny-dns&action=txt_delete&id_domain=%s&id=%s"
+	TEMPLATE_SEARCH_PARAMS_GET_RECORDS       = "page=domeny-dns&id_domain=%s"
+	TEMPLATE_SEARCH_PARAMS_DELETE_TXT_RECORD = "page=domeny-dns&action=txt_delete&id_domain=%s&id=%s"
 )
 
 type DnsClient struct {
@@ -45,6 +42,9 @@ func NewDnsClient(config DnsClientConfig) (*DnsClient, error) {
 
 	client := &http.Client{
 		Jar: jar,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
 	}
 
 	return &DnsClient{
@@ -62,11 +62,12 @@ func (c *DnsClient) PublishRecord(domain string, txt string) error {
 		return fmt.Errorf("failed to login: %w", err)
 	}
 
-	// Extract subdomain from full domain name
-	domainParts := strings.Split(domain, ".")
-	sub := strings.Join(domainParts[:len(domainParts)-2], ".")
+	// Remove last "." if included
+	readableDomain := strings.Trim(domain, ".")
 
-	klog.V(6).Infof("Publishing TXT record sub=%s, txt=%s", sub, txt)
+	// Extract subdomain from full domain name
+	domainParts := strings.Split(readableDomain, ".")
+	sub := strings.Join(domainParts[:len(domainParts)-2], ".")
 
 	// Call addTxtRecord with the obtained cookies
 	return c.addTxtRecord(sub, txt)
@@ -84,8 +85,11 @@ func (c *DnsClient) DeleteRecord(domain string) error {
 		return fmt.Errorf("failed to get records: %w", err)
 	}
 
+	// Remove last "." if included
+	readableDomain := strings.Trim(domain, ".")
+
 	// Find the correct node with the record
-	found, recordId, err := findTxtRecordId(doc, domain)
+	found, recordId, err := findTxtRecordId(doc, readableDomain)
 	if err != nil || !found {
 		return fmt.Errorf("failed to find recordId in records page: %w", err)
 	}
@@ -94,66 +98,62 @@ func (c *DnsClient) DeleteRecord(domain string) error {
 		return fmt.Errorf("record not found for domain: %s", domain)
 	}
 
-	klog.V(6).Infof("Deleting TXT record id=%s", recordId)
-
 	// Call deleteTxtRecord with the found record ID
 	return c.deleteTxtRecord(recordId)
 }
 
 func (c *DnsClient) login() error {
-	loginUrl := c.baseUrl + ENDPOINT_LOGIN + url.PathEscape(fmt.Sprintf(TEMPLATE_SEARCH_PARAMS_LOGIN, c.username, c.password))
+	loginUrl := fmt.Sprintf("%s/%s", c.baseUrl, ENDPOINT_LOGIN)
 
-	resp, err := c.httpClient.Get(loginUrl)
+	form := url.Values{}
+	form.Set("username", c.username)
+	form.Set("password", c.password)
+	form.Set("action", "login")
+	form.Set("lang", "cs")
+
+	resp, err := c.httpClient.PostForm(loginUrl, form)
 	if err != nil {
 		return fmt.Errorf("login request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
+	if resp.StatusCode != http.StatusFound {
 		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("add record failed with status %d: %s", resp.StatusCode, string(body))
+		return fmt.Errorf("add record failed with status %d, expected %d: %s", resp.StatusCode, http.StatusFound, string(body))
 	}
 
 	return nil
 }
 
 func (c *DnsClient) addTxtRecord(sub string, txt string) error {
-	addUrl := c.baseUrl + ENDPOINT_INDEX + url.PathEscape(fmt.Sprintf(TEMPLATE_SEARCH_PARAMS_ADD_TXT_RECORD, sub, txt, c.domainId))
+	addUrl := fmt.Sprintf("%s/%s", c.baseUrl, ENDPOINT_INDEX)
 
-	req, err := http.NewRequest("GET", addUrl, nil)
-	if err != nil {
-		return fmt.Errorf("failed to create add record request: %w", err)
-	}
+	form := url.Values{}
+	form.Set("sub", sub)
+	form.Set("txt", txt)
+	form.Set("page", "domeny-dns-txt-add")
+	form.Set("action", "txt_add")
+	form.Set("id_domain", c.domainId)
 
-	resp, err := c.httpClient.Do(req)
+	resp, err := c.httpClient.PostForm(addUrl, form)
 	if err != nil {
 		return fmt.Errorf("add record request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
+	if resp.StatusCode != http.StatusFound {
 		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("add record failed with status %d: %s", resp.StatusCode, string(body))
+		return fmt.Errorf("add record failed with status %d, expected %d: %s", resp.StatusCode, http.StatusFound, string(body))
 	}
 
 	return nil
 }
 
-type DnsRecord struct {
-	RecordId   string `json:"record_id"`
-	DomainName string `json:"domain_name"`
-	TextField  string `json:"text_field"`
-}
-
 func (c *DnsClient) getRecords() (*html.Node, error) {
-	getUrl := c.baseUrl + ENDPOINT_INDEX + url.PathEscape(fmt.Sprintf(TEMPLATE_SEARCH_PARAMS_GET_RECORDS, c.domainId))
+	searchParams := url.PathEscape(fmt.Sprintf(TEMPLATE_SEARCH_PARAMS_GET_RECORDS, c.domainId))
+	getUrl := fmt.Sprintf("%s/%s?%s", c.baseUrl, ENDPOINT_INDEX, searchParams)
 
-	req, err := http.NewRequest("GET", getUrl, nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create get records request: %w", err)
-	}
-
-	resp, err := c.httpClient.Do(req)
+	resp, err := c.httpClient.Get(getUrl)
 	if err != nil {
 		return nil, fmt.Errorf("get records request failed: %w", err)
 	}
@@ -161,7 +161,7 @@ func (c *DnsClient) getRecords() (*html.Node, error) {
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("get records failed with status %d: %s", resp.StatusCode, string(body))
+		return nil, fmt.Errorf("get records failed with status %d, expected 200: %s", resp.StatusCode, string(body))
 	}
 
 	doc, err := html.Parse(resp.Body)
@@ -172,17 +172,18 @@ func (c *DnsClient) getRecords() (*html.Node, error) {
 	return doc, nil
 }
 
+// findTxtRecordId is a helper function which, given a root node of a document and a domain, finds the recordId of the TXT record associated with this domain
 func findTxtRecordId(node *html.Node, domain string) (found bool, recordId string, err error) {
 	// If node == <td data-title="TXT záznam"> && node.PrevSibling == <td><strong>{domain}</strong></td>
 	if isTxtRowNode(node) {
-		nodeDomain, err := getTxtNodeDomain(node.PrevSibling)
+		nodeDomain, err := getTxtNodeDomain(node)
 		if err != nil {
 			return false, "", err
 		}
 
 		if nodeDomain == domain {
 			// node.NextSibling is <td><a href="...">, return the parsed recordId from href
-			recordId, err := getRecordIdFromNodeDomain(node.NextSibling)
+			recordId, err := getRecordIdFromNodeDomain(node)
 			if err != nil {
 				return false, "", err
 			}
@@ -195,7 +196,7 @@ func findTxtRecordId(node *html.Node, domain string) (found bool, recordId strin
 	for childNode := node.FirstChild; childNode != nil; childNode = childNode.NextSibling {
 		found, txtNode, err := findTxtRecordId(childNode, domain)
 		if err != nil || found {
-			return found, txtNode, nil
+			return found, txtNode, err
 		}
 	}
 	return false, "", nil
@@ -214,29 +215,42 @@ func isTxtRowNode(node *html.Node) bool {
 	return false
 }
 
-// getTxtNodeDomain is a helper function to retrieve domain from node of type <td><strong>{domain}</strong></td>
-func getTxtNodeDomain(tdNode *html.Node) (string, error) {
-	strongNode := tdNode.FirstChild
-	if strongNode == nil {
-		return "", fmt.Errorf("unexpected node structure, tdNode with txt record has no child")
+// getTxtNodeDomain is a helper function to retrieve domain from node of type <td><strong>{domain}</strong></td><td data-title="TXT záznam"/>
+func getTxtNodeDomain(txtTdNode *html.Node) (string, error) {
+	domainTdNode := txtTdNode.PrevSibling
+	for domainTdNode != nil && domainTdNode.Type != html.ElementNode {
+		domainTdNode = domainTdNode.PrevSibling
+	}
+	if domainTdNode == nil {
+		return "", fmt.Errorf("unexpected node structure, tdNode with txt record does not have a td prevSibling")
+	}
+
+	strongNode := domainTdNode.FirstChild
+	if strongNode == nil || strongNode.Type != html.ElementNode || strongNode.Data != "strong" {
+		return "", fmt.Errorf("unexpected node structure, tdNode with domain for txt record has no child with tag <strong>")
 	}
 
 	domainNode := strongNode.FirstChild
-	if domainNode == nil {
-		return "", fmt.Errorf("unexpected node structure, strongNode with txt record has no child")
+	if domainNode == nil || domainNode.Type != html.TextNode {
+		return "", fmt.Errorf("unexpected node structure, strongNode with domain for txt record has no child of type TextNode")
 	}
 
-	if domainNode.Type == html.TextNode {
-		return domainNode.Data, nil
-	}
-
-	return "", fmt.Errorf("unexpected node structure, domainNode with txt record is not of type TextNode, but %T", domainNode.Type)
+	return domainNode.Data, nil
 }
 
-func getRecordIdFromNodeDomain(tdNode *html.Node) (string, error) {
-	aNode := tdNode.FirstChild
-	if aNode == nil {
-		return "", fmt.Errorf("unexpected node structure, tdNode with txt record has no child")
+// getRecordIdFromNodeDomain is a helper function to retrieve the recordId from node of type <td data-title="TXT záznam"/><td><a href="index.php?recordId={id}.../>"
+func getRecordIdFromNodeDomain(txtTdNode *html.Node) (string, error) {
+	aTdNode := txtTdNode.NextSibling
+	for aTdNode != nil && aTdNode.Type != html.ElementNode {
+		aTdNode = aTdNode.NextSibling
+	}
+	if aTdNode == nil {
+		return "", fmt.Errorf("unexpected node structure, tdNode with txt record does not have a td nextSibling")
+	}
+
+	aNode := aTdNode.FirstChild
+	if aNode == nil || aNode.Type != html.ElementNode || aNode.Data != "a" {
+		return "", fmt.Errorf("unexpected node structure, tdNode with txt record has no child with tag <a>")
 	}
 
 	for _, a := range aNode.Attr {
@@ -247,11 +261,11 @@ func getRecordIdFromNodeDomain(tdNode *html.Node) (string, error) {
 			}
 			path := hrefChunks[1]
 
-			recordIdIndex := strings.Index(path, "id=")
-			if recordIdIndex == -1 {
+			_, after, ok := strings.Cut(path, "id=")
+			if !ok {
 				return "", fmt.Errorf("failed to find id= in href %s", path)
 			}
-			return path[recordIdIndex+3:], nil
+			return after, nil
 		}
 	}
 
@@ -259,22 +273,18 @@ func getRecordIdFromNodeDomain(tdNode *html.Node) (string, error) {
 }
 
 func (c *DnsClient) deleteTxtRecord(recordId string) error {
-	deleteUrl := c.baseUrl + ENDPOINT_INDEX + url.PathEscape(fmt.Sprintf(TEMPLATE_SEARCH_PARAMS_DELETE_TXT_RECORD, c.domainId, recordId))
+	searchParams := url.PathEscape(fmt.Sprintf(TEMPLATE_SEARCH_PARAMS_DELETE_TXT_RECORD, c.domainId, recordId))
+	deleteUrl := fmt.Sprintf("%s/%s?%s", c.baseUrl, ENDPOINT_INDEX, searchParams)
 
-	req, err := http.NewRequest("GET", deleteUrl, nil)
-	if err != nil {
-		return fmt.Errorf("failed to create delete record request: %w", err)
-	}
-
-	resp, err := c.httpClient.Do(req)
+	resp, err := c.httpClient.Get(deleteUrl)
 	if err != nil {
 		return fmt.Errorf("delete record request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
+	if resp.StatusCode != http.StatusFound {
 		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("delete record failed with status %d: %s", resp.StatusCode, string(body))
+		return fmt.Errorf("delete record failed with status %d, expected %d: %s", resp.StatusCode, http.StatusFound, string(body))
 	}
 
 	return nil

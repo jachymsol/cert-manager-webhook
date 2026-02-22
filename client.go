@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"golang.org/x/net/html"
+	"k8s.io/klog/v2"
 )
 
 const (
@@ -65,6 +66,8 @@ func (c *DnsClient) PublishRecord(domain string, txt string) error {
 	domainParts := strings.Split(domain, ".")
 	sub := strings.Join(domainParts[:len(domainParts)-2], ".")
 
+	klog.V(6).Infof("Publishing TXT record sub=%s, txt=%s", sub, txt)
+
 	// Call addTxtRecord with the obtained cookies
 	return c.addTxtRecord(sub, txt)
 }
@@ -90,6 +93,8 @@ func (c *DnsClient) DeleteRecord(domain string) error {
 	if recordId == "" {
 		return fmt.Errorf("record not found for domain: %s", domain)
 	}
+
+	klog.V(6).Infof("Deleting TXT record id=%s", recordId)
 
 	// Call deleteTxtRecord with the found record ID
 	return c.deleteTxtRecord(recordId)

@@ -32,6 +32,46 @@ subjects:
     name: {{ include "example-webhook.fullname" . }}
     namespace: {{ .Release.Namespace }}
 ---
+# Grant the webhook permission to read Secrets containing configurations
+# for Issuers and ClusterIssuers
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "example-webhook.fullname" . }}:secret-reader
+  labels:
+    app: {{ include "example-webhook.name" . }}
+    chart: {{ include "example-webhook.chart" . }}
+    release: {{ .Release.Name }}
+    heritage: {{ .Release.Service }}
+rules:
+  - apiGroups:
+      - ''
+    resources:
+      - 'secrets'
+    verbs:
+      - 'list'
+      - 'get'
+      - 'watch'
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+name: {{ include "example-webhook.fullname" . }}:secret-reader
+  labels:
+    app: {{ include "example-webhook.name" . }}
+    chart: {{ include "example-webhook.chart" . }}
+    release: {{ .Release.Name }}
+    heritage: {{ .Release.Service }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "example-webhook.fullname" . }}:secret-reader
+subjects:
+  - apiGroup: ""
+    kind: ServiceAccount
+    name: {{ include "example-webhook.fullname" . }}
+    namespace: {{ .Release.Namespace }}
+---
 # apiserver gets the auth-delegator role to delegate auth decisions to
 # the core apiserver
 apiVersion: rbac.authorization.k8s.io/v1

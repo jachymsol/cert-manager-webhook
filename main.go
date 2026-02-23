@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"strings"
 
 	extapi "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -68,12 +67,8 @@ func (c *jachymsolDNSProviderSolver) Present(ch *acmev1alpha1.ChallengeRequest) 
 		return fmt.Errorf("unable to get client: %w", err)
 	}
 
-	// Extract subdomain from FQDN (e.g., _acme-challenge.sub.example.com -> _acme-challenge.sub)
-	domainParts := strings.Split(ch.ResolvedFQDN, ".")
-	sub := strings.Join(domainParts[:len(domainParts)-2], ".")
-
 	// Publish the DNS record
-	err = client.PublishRecord(sub, ch.Key)
+	err = client.PublishRecord(ch.ResolvedFQDN, ch.Key)
 	if err != nil {
 		return fmt.Errorf("unable to publish record: %w", err)
 	}
